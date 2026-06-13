@@ -355,8 +355,25 @@ def run_interview(doc_type, client, model):
         if turn == 24:
             print(f"[แจ้งเตือน: เหลืออีก {MAX_TURNS - turn - 1} รอบ พิมพ์ 'สรุป' เพื่อ generate intent.md]\n")
 
-    print(f"\nถึงขีดจำกัด {MAX_TURNS} รอบแล้ว กรุณาพิมพ์ 'สรุป' ในครั้งหน้า หรือรัน new-doc-intake ใหม่")
-    return None
+    # Max turns reached — force summary generation from accumulated context
+    print(f"\n[ถึง {MAX_TURNS} รอบ — สร้าง intent.md จากข้อมูลที่รวบรวมได้...]\n")
+    messages.append({
+        "role": "user",
+        "content": "สรุปข้อมูลทั้งหมดที่รวบรวมได้และ output intent.md ได้เลย อย่าถามเพิ่มแล้ว"
+    })
+    resp = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=2000,
+    )
+    reply = resp.choices[0].message.content.strip()
+    match = re.search(r"<INTENT_COMPLETE>(.*?)</INTENT_COMPLETE>", reply, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    if "<INTENT_COMPLETE>" in reply:
+        return reply.split("<INTENT_COMPLETE>", 1)[1].strip()
+    return reply
 
 
 def main():

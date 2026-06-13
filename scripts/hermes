@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""
+hermes <skill> <type> <project-name>
+hermes intake article my-study
+
+Env vars:
+  OPENROUTER_API_KEY  (required)
+  OPENROUTER_MODEL    (optional, default: nousresearch/hermes-3-llama-3.1-70b)
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+SCRIPT_PATH = Path(__file__).resolve()
+while SCRIPT_PATH.is_symlink():
+    SCRIPT_PATH = Path(os.readlink(SCRIPT_PATH))
+SYSTEM_DIR = SCRIPT_PATH.parent.parent
+
+DOC_TYPES = ["article", "proposal", "policy", "report"]
+
+META_FIELDS = {
+    "article": """\
+  - language (thai / english)
+  - target — วารสารหรือ conference ที่ตั้งใจส่ง
+  - word_limit — จำนวนคำที่กำหนด
+  - deadline — กำหนดส่ง""",
+    "proposal": """\
+  - language (thai / english)
+  - funder — แหล่งทุน เช่น สกสว., วช., TRF
+  - budget — งบประมาณโดยประมาณ
+  - duration — ระยะเวลา เช่น 2 ปี
+  - deadline — กำหนดส่ง""",
+    "policy": """\
+  - language (thai / english)
+  - audience — กลุ่มผู้อ่านหลัก เช่น ผู้บริหาร, คณะกรรมการ
+  - scope — ขอบเขตนโยบาย เช่น ระดับสถาบัน, ระดับชาติ
+  - deadline — กำหนดส่ง""",
+    "report": """\
+  - language (thai / english)
+  - project_name — ชื่อโครงการวิจัย
+  - institution — สถาบัน/หน่วยงาน
+  - deadline — กำหนดส่ง""",
+}
+
+DEFAULT_STRUCTURE = {
+    "article":  "Introduction → Literature Review → Method → Results → Discussion → Conclusion",
+    "proposal": "ความสำคัญ → วัตถุประสงค์ → กรอบแนวคิด → วิธีการ → ประโยชน์ → งบประมาณ",
+    "policy":   "บทสรุปผู้บริหาร → บริบท → หลักฐาน → ข้อเสนอ → ผลกระทบ → ข้อจำกัด",
+    "report":   "บทที่ 1–5 + บรรณานุกรม + ภาคผนวก",
+}
+
+INTENT_TEMPLATE = {
+    "article": """\
+## Meta
+type: article
+language: <thai/english>
+target: "<journal or conference>"
+word_limit: <number>
+deadline: "<date>"
+
+## Core Argument
+thesis: >
+  <thesis statement>
+
+key_claims:
+  - "<claim 1>"
+  - "<claim 2>"
+  - "<claim 3>"
+
+## Structure
+<structure_block>
+
+## Material
+references:
+  - references/
+data: "<path or empty>"
+analysis: "<path or empty>"
+
+## Constraints
+avoid: "<topics to avoid>"
+emphasize: "<topics to emphasize>"
+style_notes: "<special style notes>"
+""",
+
+    "proposal": """\
+## Meta
+type: proposal
+language: <thai/english>
+funder: "<funder>"
+budget: "<budget>"
+duration: "<duration>"
+deadline: "<date>"
+
+## Core Argument
+thesis: >
+  <research question and significance>
+
+key_claims:
+  - "<gap in literature>"
+  - "<what this project does differently>"
+  - "<expected outcomes>"
+
+## Structure
+<structure_block>
+
+## Material
+references:
+  - references/
+data: "<path or empty>"
+analysis: "<path or empty>"
+
+## Constraints
+avoid: "<topics to avoid>"
+emphasize: "<topics to emphasize>"
+style_notes: "<special style notes>"
+""",
+
+    "policy": """\
+## Meta
+type: policy
+language: <thai/english>
+audience: "<target audience>"
+scope: "<policy scope>"
+deadline: "<date>"
+
+## Core Argument
+thesis: >
+  <problem and main proposal>
+
+key_claims:
+  - "<supporting evidence 1>"
+  - "<supporting evidence 2>"
+  - "<supporting evidence 3>"
+
+## Structure
+<structure_block>
+
+## Material
+references:
+  - references/
+data: "<path or empty>"
+analysis: "<path or empty>"
+
+## Constraints
+avoid: "<topics to avoid>"
+emphasize: "<topics to emphasize>"
+style_notes: "<special style notes>"
+""",
+
+    "report": """\
+## Meta
+type: report
+language: <thai/english>
+project_name: "<project name>"
+institution: "<institution>"
+deadline: "<date>"
+
+## Core Argument
+thesis: >
+  <main objective and summary>
+
+key_claims:
+  - "<key finding 1>"
+  - "<key finding 2>"
+  - "<key finding 3>"
+
+## Structure
+<structure_block>
+
+## Material
+references:
+  - references/
+data: "<path or empty>"
+analysis: "<path or empty>"
+
+## Constraints
+avoid: "<topics to avoid>"
+emphasize: "<topics to emphasize>"
+style_notes: "<special style notes>"
+""",
+}
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "เขียนไฟล์ลงใน project directory เรียกเมื่อรวบรวมข้อมูลครบและได้รับการยืนยันแล้ว",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "path ของไฟล์ relative ถึง project directory เช่น intent.md"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "เนื้อหาของไฟล์"
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    }
+]
+
+
+def load_skill(skill_name, **kwargs):
+    skill_path = SYSTEM_DIR / "skills" / f"{skill_name}.md"
+    if not skill_path.exists():
+        print(f"Error: skill '{skill_name}' not found ({skill_path})")
+        sys.exit(1)
+    text = skill_path.read_text(encoding="utf-8")
+    for k, v in kwargs.items():
+        text = text.replace("{" + k + "}", v)
+    return text
+
+
+def create_project_structure(project_dir, system_dir):
+    (project_dir / "references").mkdir(parents=True, exist_ok=True)
+    (project_dir / "analysis").mkdir(exist_ok=True)
+
+    context = f"""# context
+
+ก่อนเริ่มงานทุกครั้ง อ่านไฟล์เหล่านี้ตามลำดับ:
+
+1. `{system_dir}/system.md` — กฎ สไตล์ และ workflow ของระบบ
+2. `intent.md` — intention และ material ของเอกสารนี้
+
+ห้ามยกร่างหรือแก้ไขเอกสารโดยไม่อ่านทั้งสองไฟล์ก่อน
+"""
+    (project_dir / "CLAUDE.md").write_text(context, encoding="utf-8")
+    (project_dir / "AGENTS.md").write_text(context, encoding="utf-8")
+    (project_dir / "draft.qmd").write_text(
+        '---\ntitle: ""\nauthor: ""\ndate: today\nformat: html\n---\n\n'
+        "<!-- Academic Writer — draft.qmd -->\n"
+        "<!-- intent.md ถูกสร้างโดย hermes intake แล้ว ตรวจสอบก่อนใช้ -->\n",
+        encoding="utf-8",
+    )
+
+
+def run(skill, doc_type, project_name, client, model):
+    project_dir = Path(project_name)
+
+    # Warn before overwriting
+    if (project_dir / "intent.md").exists():
+        print(f"คำเตือน: '{project_name}/intent.md' มีอยู่แล้ว")
+        try:
+            ans = input("รันสัมภาษณ์ใหม่และเขียนทับ? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nยกเลิก")
+            sys.exit(0)
+        if ans != "y":
+            sys.exit(0)
+
+    create_project_structure(project_dir, SYSTEM_DIR)
+    print(f"✓ project '{project_name}' ready\n")
+
+    system_prompt = load_skill(
+        skill,
+        doc_type=doc_type,
+        project_name=project_name,
+        meta_fields=META_FIELDS[doc_type],
+        default_structure=DEFAULT_STRUCTURE[doc_type],
+        intent_template=INTENT_TEMPLATE[doc_type],
+        system_dir=str(SYSTEM_DIR),
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"เริ่มได้เลยครับ"},
+    ]
+
+    print(f"{'='*60}")
+    print(f"Hermes — {skill}  (type: {doc_type}  project: {project_name})")
+    print(f"model: {model}")
+    print(f"{'='*60}")
+    print("พิมพ์ 'quit' เพื่อออก\n")
+
+    while True:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=TOOLS,
+            tool_choice="auto",
+            temperature=0.7,
+            max_tokens=2000,
+        )
+
+        msg = resp.choices[0].message
+
+        # Append assistant message (handle both dict and object)
+        try:
+            messages.append(msg.model_dump(exclude_unset=True))
+        except Exception:
+            messages.append({"role": "assistant", "content": msg.content or ""})
+
+        # Handle tool calls
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                if tc.function.name == "write_file":
+                    target = project_dir / args["path"]
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(args["content"], encoding="utf-8")
+                    print(f"✓ เขียน {target}")
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": f"เขียน {args['path']} สำเร็จ",
+                    })
+
+                    # After intent.md is written, let user confirm or continue
+                    if args["path"] == "intent.md":
+                        print(f"\n--- intent.md ---")
+                        print(args["content"])
+                        print(f"-----------------\n")
+                        try:
+                            ans = input("พอใจกับ intent.md มั้ย? (y เพื่อจบ / n เพื่อแก้เพิ่ม): ").strip().lower()
+                        except (EOFError, KeyboardInterrupt):
+                            break
+                        if ans == "y":
+                            print(f"\n✓ intake เสร็จสมบูรณ์")
+                            print(f"\nNext steps:")
+                            print(f"  cd {project_name}")
+                            print(f"  claude 'draft outline'")
+                            return
+            continue
+
+        # Regular message
+        if msg.content:
+            print(f"Agent: {msg.content}\n")
+
+        try:
+            user_input = input("คุณ: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nออก")
+            sys.exit(0)
+
+        if user_input.lower() in ("quit", "exit", "ออก"):
+            sys.exit(0)
+
+        if user_input:
+            messages.append({"role": "user", "content": user_input})
+
+
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: hermes <skill> <type> <project-name>")
+        print("       hermes intake article my-study")
+        print(f"\nSkills: {', '.join(p.stem for p in (SYSTEM_DIR / 'skills').glob('*.md'))}")
+        print(f"Types:  {', '.join(DOC_TYPES)}")
+        sys.exit(1)
+
+    skill, doc_type, project_name = sys.argv[1], sys.argv[2], sys.argv[3]
+
+    if doc_type not in DOC_TYPES:
+        print(f"Error: unknown type '{doc_type}'")
+        print(f"Available: {', '.join(DOC_TYPES)}")
+        sys.exit(1)
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        print("Error: OPENROUTER_API_KEY not set")
+        print("       export OPENROUTER_API_KEY=sk-or-...")
+        sys.exit(1)
+
+    model = os.environ.get("OPENROUTER_MODEL", "nousresearch/hermes-3-llama-3.1-70b")
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("Error: pip install openai")
+        sys.exit(1)
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"HTTP-Referer": "https://github.com/datakruroo/academic-writer"},
+    )
+
+    run(skill, doc_type, project_name, client, model)
+
+
+if __name__ == "__main__":
+    main()

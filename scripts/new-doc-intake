@@ -1,0 +1,410 @@
+#!/usr/bin/env python3
+"""
+new-doc-intake — Hermes intake agent for academic-writer
+Interviews the researcher and generates intent.md via OpenRouter
+
+Usage: new-doc-intake <type> <project-name>
+       new-doc-intake article my-study
+
+Env vars:
+  OPENROUTER_API_KEY  (required)
+  OPENROUTER_MODEL    (optional, default: nousresearch/hermes-3-llama-3.1-70b)
+"""
+
+import os
+import re
+import sys
+from pathlib import Path
+
+SCRIPT_PATH = Path(__file__).resolve()
+while SCRIPT_PATH.is_symlink():
+    SCRIPT_PATH = Path(os.readlink(SCRIPT_PATH))
+SYSTEM_DIR = SCRIPT_PATH.parent.parent
+
+DOC_TYPES = ["article", "proposal", "policy", "report"]
+
+META_FIELDS = {
+    "article": [
+        "language (thai / english)",
+        "target — วารสารหรือ conference ที่ตั้งใจส่ง",
+        "word_limit — จำนวนคำที่กำหนด",
+        "deadline — กำหนดส่ง",
+    ],
+    "proposal": [
+        "language (thai / english)",
+        "funder — แหล่งทุน เช่น สกสว., วช., TRF",
+        "budget — งบประมาณโดยประมาณ",
+        "duration — ระยะเวลา เช่น 2 ปี",
+        "deadline — กำหนดส่ง",
+    ],
+    "policy": [
+        "language (thai / english)",
+        "audience — กลุ่มผู้อ่านหลัก เช่น ผู้บริหาร, คณะกรรมการ",
+        "scope — ขอบเขตนโยบาย เช่น ระดับสถาบัน, ระดับชาติ",
+        "deadline — กำหนดส่ง",
+    ],
+    "report": [
+        "language (thai / english)",
+        "project_name — ชื่อโครงการวิจัย",
+        "institution — สถาบัน/หน่วยงาน",
+        "deadline — กำหนดส่ง",
+    ],
+}
+
+DEFAULT_STRUCTURE = {
+    "article":  "Introduction → Literature Review → Method → Results → Discussion → Conclusion",
+    "proposal": "ความสำคัญ → วัตถุประสงค์ → กรอบแนวคิด → วิธีการ → ประโยชน์ → งบประมาณ",
+    "policy":   "บทสรุปผู้บริหาร → บริบท → หลักฐาน → ข้อเสนอ → ผลกระทบ → ข้อจำกัด",
+    "report":   "บทที่ 1–5 + บรรณานุกรม + ภาคผนวก",
+}
+
+TEMPLATE = {
+    "article": """\
+## Meta
+type: article
+language: {language}
+target: "{target}"
+word_limit: {word_limit}
+deadline: "{deadline}"
+
+## Core Argument
+thesis: >
+  {thesis}
+
+key_claims:
+  - "{claim1}"
+  - "{claim2}"
+  - "{claim3}"
+
+## Structure
+{structure_block}
+
+## Material
+references:
+  - references/
+data: "{data}"
+analysis: "{analysis}"
+
+## Constraints
+avoid: "{avoid}"
+emphasize: "{emphasize}"
+style_notes: "{style_notes}"
+""",
+    "proposal": """\
+## Meta
+type: proposal
+language: {language}
+funder: "{funder}"
+budget: "{budget}"
+duration: "{duration}"
+deadline: "{deadline}"
+
+## Core Argument
+thesis: >
+  {thesis}
+
+key_claims:
+  - "{claim1}"
+  - "{claim2}"
+  - "{claim3}"
+
+## Structure
+{structure_block}
+
+## Material
+references:
+  - references/
+data: "{data}"
+analysis: "{analysis}"
+
+## Constraints
+avoid: "{avoid}"
+emphasize: "{emphasize}"
+style_notes: "{style_notes}"
+""",
+    "policy": """\
+## Meta
+type: policy
+language: {language}
+audience: "{audience}"
+scope: "{scope}"
+deadline: "{deadline}"
+
+## Core Argument
+thesis: >
+  {thesis}
+
+key_claims:
+  - "{claim1}"
+  - "{claim2}"
+  - "{claim3}"
+
+## Structure
+{structure_block}
+
+## Material
+references:
+  - references/
+data: "{data}"
+analysis: "{analysis}"
+
+## Constraints
+avoid: "{avoid}"
+emphasize: "{emphasize}"
+style_notes: "{style_notes}"
+""",
+    "report": """\
+## Meta
+type: report
+language: {language}
+project_name: "{project_name}"
+institution: "{institution}"
+deadline: "{deadline}"
+
+## Core Argument
+thesis: >
+  {thesis}
+
+key_claims:
+  - "{claim1}"
+  - "{claim2}"
+  - "{claim3}"
+
+## Structure
+{structure_block}
+
+## Material
+references:
+  - references/
+data: "{data}"
+analysis: "{analysis}"
+
+## Constraints
+avoid: "{avoid}"
+emphasize: "{emphasize}"
+style_notes: "{style_notes}"
+""",
+}
+
+
+def build_system_prompt(doc_type):
+    meta = "\n".join(f"  - {f}" for f in META_FIELDS[doc_type])
+    default_struct = DEFAULT_STRUCTURE[doc_type]
+    template_example = TEMPLATE[doc_type]
+
+    return f"""คุณคือ intake agent สำหรับระบบ academic-writer
+ทำหน้าที่สัมภาษณ์นักวิจัยเพื่อรวบรวมข้อมูลสำหรับเอกสารประเภท "{doc_type}"
+
+## วิธีสัมภาษณ์
+- ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวทั้งหมด
+- ถ้าคำตอบไม่ชัดเจน ให้ถามต่อหรือขอตัวอย่าง
+- ใช้ภาษาที่เป็นธรรมชาติ ไม่เป็นทางการจนเกินไป
+- เมื่อรวบรวมครบแล้ว สรุปให้ตรวจสอบก่อนเสมอ
+
+## ข้อมูลที่ต้องรวบรวม (ตามลำดับนี้)
+
+### 1. Meta
+{meta}
+
+### 2. Core Argument (สำคัญที่สุด)
+- thesis: ข้อสรุปหรือคำถามหลักของงาน (1-2 ประโยคชัดเจน)
+- key_claims: ข้ออ้างหลัก 3 ข้อที่สนับสนุน thesis
+
+### 3. Structure
+- default คือ: {default_struct}
+- ถามว่าต้องการใช้ default หรือปรับแก้ ถ้าปรับให้รับรายการ section ใหม่
+
+### 4. Material
+- ไฟล์ PDF อ้างอิงที่มีอยู่แล้ว (ถ้ายังไม่มีให้ข้าม)
+- path ของ dataset ถ้ามี
+- path ของ R/Python script ถ้ามี
+
+### 5. Constraints
+- ประเด็นที่ไม่ต้องการพูดถึง
+- ประเด็นที่ต้องการเน้น
+- คำแนะนำพิเศษด้านสไตล์
+
+## เมื่อรวบรวมข้อมูลครบ
+1. สรุปสั้นๆ ให้นักวิจัยยืนยัน
+2. เมื่อนักวิจัยยืนยันแล้ว ให้ output intent.md โดยเขียน:
+
+<INTENT_COMPLETE>
+[เนื้อหา intent.md กรอกข้อมูลจริงครบทุกฟิลด์]
+</INTENT_COMPLETE>
+
+## รูปแบบ intent.md ที่ต้อง output
+กรอกข้อมูลจริงทุกฟิลด์ตาม template นี้ อย่าเว้นว่างหรือใส่ placeholder:
+
+```
+{template_example}
+```
+
+หมายเหตุ structure_block:
+- ถ้าใช้ default ให้ใส่: `# ใช้ default structure`
+- ถ้าปรับแก้ให้ใส่:
+  ```
+  sections:
+    - section1
+    - section2
+  ```
+
+นักวิจัยสามารถพิมพ์ "สรุป" ได้ทุกเวลาเพื่อให้คุณ output intent.md จากข้อมูลที่รวบรวมมาจนถึงตอนนี้
+"""
+
+
+def create_project_structure(name, doc_type):
+    project = Path(name)
+    (project / "references").mkdir(parents=True, exist_ok=True)
+    (project / "analysis").mkdir(parents=True, exist_ok=True)
+
+    context_content = f"""# context
+
+ก่อนเริ่มงานทุกครั้ง อ่านไฟล์เหล่านี้ตามลำดับ:
+
+1. `{SYSTEM_DIR}/system.md` — กฎ สไตล์ และ workflow ของระบบ
+2. `intent.md` — intention และ material ของเอกสารนี้
+
+ห้ามยกร่างหรือแก้ไขเอกสารโดยไม่อ่านทั้งสองไฟล์ก่อน
+"""
+    (project / "CLAUDE.md").write_text(context_content, encoding="utf-8")
+    (project / "AGENTS.md").write_text(context_content, encoding="utf-8")
+
+    (project / "draft.qmd").write_text(
+        '---\ntitle: ""\nauthor: ""\ndate: today\nformat: html\n---\n\n'
+        "<!-- Academic Writer — draft.qmd -->\n"
+        "<!-- intent.md ถูกสร้างโดย new-doc-intake แล้ว ตรวจสอบก่อนใช้ -->\n",
+        encoding="utf-8",
+    )
+
+
+def run_interview(doc_type, client, model):
+    system_prompt = build_system_prompt(doc_type)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "[เริ่มการสัมภาษณ์]"},
+    ]
+
+    print(f"\n{'='*60}")
+    print(f"Academic Writer — Intake Agent  (type: {doc_type})")
+    print(f"model: {model}")
+    print(f"{'='*60}")
+    print("พิมพ์ 'สรุป' เพื่อให้ agent สร้าง intent.md จากข้อมูลที่มี")
+    print("พิมพ์ 'quit' เพื่อออก\n")
+
+    # Opening message
+    resp = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.7,
+        max_tokens=600,
+    )
+    opening = resp.choices[0].message.content.strip()
+    messages.append({"role": "assistant", "content": opening})
+    print(f"Agent: {opening}\n")
+
+    # Interview loop
+    while True:
+        try:
+            user_input = input("คุณ: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nออกจากการสัมภาษณ์")
+            sys.exit(0)
+
+        if user_input.lower() in ("quit", "exit", "ออก"):
+            print("ออกจากการสัมภาษณ์")
+            sys.exit(0)
+
+        if not user_input:
+            continue
+
+        # Inject trigger if user wants to wrap up early
+        if user_input == "สรุป":
+            user_input = "สรุปข้อมูลที่รวบรวมได้ทั้งหมดและ output intent.md ได้เลย"
+
+        messages.append({"role": "user", "content": user_input})
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2000,
+        )
+        reply = resp.choices[0].message.content.strip()
+        messages.append({"role": "assistant", "content": reply})
+
+        # Check for completion marker
+        if "<INTENT_COMPLETE>" in reply:
+            match = re.search(
+                r"<INTENT_COMPLETE>(.*?)</INTENT_COMPLETE>", reply, re.DOTALL
+            )
+            if match:
+                before = reply[: reply.index("<INTENT_COMPLETE>")].strip()
+                if before:
+                    print(f"\nAgent: {before}\n")
+                return match.group(1).strip()
+            # Marker present but no closing tag — try to grab everything after
+            after_open = reply.split("<INTENT_COMPLETE>", 1)[1].strip()
+            if after_open:
+                return after_open
+
+        print(f"\nAgent: {reply}\n")
+
+    return None
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: new-doc-intake <type> <project-name>")
+        print("Types: article | proposal | policy | report")
+        sys.exit(1)
+
+    doc_type, name = sys.argv[1], sys.argv[2]
+
+    if doc_type not in DOC_TYPES:
+        print(f"Error: unknown type '{doc_type}'")
+        print(f"Available: {', '.join(DOC_TYPES)}")
+        sys.exit(1)
+
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        print("Error: OPENROUTER_API_KEY environment variable is not set")
+        print("       export OPENROUTER_API_KEY=sk-or-...")
+        sys.exit(1)
+
+    model = os.environ.get(
+        "OPENROUTER_MODEL", "nousresearch/hermes-3-llama-3.1-70b"
+    )
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("Error: openai package not installed")
+        print("       pip install openai")
+        sys.exit(1)
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"HTTP-Referer": "https://github.com/datakruroo/academic-writer"},
+    )
+
+    create_project_structure(name, doc_type)
+    print(f"✓ Project '{name}' created")
+
+    intent_content = run_interview(doc_type, client, model)
+
+    if intent_content:
+        intent_path = Path(name) / "intent.md"
+        intent_path.write_text(intent_content + "\n", encoding="utf-8")
+        print(f"\n✓ intent.md เขียนแล้วที่ {intent_path}")
+        print(f"\nNext steps:")
+        print(f"  cd {name}")
+        print(f"  # ตรวจสอบ intent.md แล้วแก้ถ้าจำเป็น")
+        print(f"  claude 'draft outline'")
+    else:
+        print("\nไม่ได้รับ intent.md จาก agent — ลองรันใหม่อีกครั้ง")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -2,8 +2,8 @@
 
 ระบบช่วยเขียนเอกสารวิชาการด้วย AI สำหรับนักวิจัยสาขาวิทยาการข้อมูลทางการศึกษา
 
-- **Hermes (OpenRouter)** — intake agent: สัมภาษณ์รับความต้องการและสร้าง `intent.md`
-- **Claude Code / OpenAI Codex** — writing agent: ยกร่างและแก้ไขเอกสารจาก `intent.md`
+- **Hermes (OpenRouter)** — intake: สัมภาษณ์รับความต้องการและเขียน `intent.md` อัตโนมัติ
+- **Claude Code / OpenAI Codex** — writing: ยกร่างและแก้ไขเอกสารจาก `intent.md`
 
 ---
 
@@ -16,13 +16,29 @@ pip install -r requirements.txt
 bash install.sh
 ```
 
-ตั้งค่า API key สำหรับ intake agent (ถ้าใช้ `new-doc-intake`):
+ตั้งค่า API key สำหรับ Hermes:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
+# เพิ่มใน ~/.zshrc หรือ ~/.bashrc เพื่อให้ถาวร
 ```
 
-เพิ่มบรรทัดนี้ใน `~/.zshrc` หรือ `~/.bashrc` เพื่อให้ถาวร
+---
+
+## โครงสร้าง repo
+
+```
+academic-writer/
+├── system.md          ← กฎ สไตล์ และ workflow สำหรับ writing agent
+├── skills/
+│   └── intake.md      ← system prompt ของ Hermes intake (แก้ได้โดยไม่ต้องเขียน Python)
+├── templates/         ← intent.md template เปล่าสำหรับ new-doc
+├── scripts/
+│   ├── new-doc        ← สร้าง project + template intent.md เปล่า
+│   ├── hermes         ← runner สำหรับ Hermes skills
+│   └── new-doc-intake ← (legacy) intake แบบ Python chatbot
+└── install.sh
+```
 
 ---
 
@@ -39,36 +55,26 @@ export OPENROUTER_API_KEY=sk-or-...
 
 ## สร้าง project ใหม่
 
-มีสองวิธีขึ้นอยู่กับว่าต้องการกรอก intent.md เองหรือให้ AI ช่วย
+### วิธีที่ 1 — ให้ Hermes สัมภาษณ์และเขียน intent.md ให้ (แนะนำ)
 
-### วิธีที่ 1 — กรอก intent.md เอง
+```bash
+hermes intake article my-study
+```
+
+Hermes จะสัมภาษณ์ทีละขั้น เมื่อข้อมูลครบจะเรียก `write_file` เขียน `intent.md` ลง project folder โดยตรง แสดง preview และรอยืนยันก่อนจบ ถ้าไม่พอใจคุยต่อได้เลย
+
+**เปลี่ยน model:**
+```bash
+export OPENROUTER_MODEL=nousresearch/hermes-3-llama-3.1-405b
+hermes intake proposal climate-project
+```
+
+### วิธีที่ 2 — กรอก intent.md เอง
 
 ```bash
 new-doc article my-study
 cd my-study
 # แก้ไข intent.md ให้ครบ แล้วเริ่มเขียน
-```
-
-`new-doc` จะสร้าง project folder พร้อม `intent.md` ที่เป็น template ว่างๆ ให้กรอกเอง
-
-### วิธีที่ 2 — ให้ Hermes สัมภาษณ์และเขียน intent.md ให้
-
-```bash
-new-doc-intake article my-study
-```
-
-Hermes จะถามคำถามทีละขั้นจนครบ แล้วสร้าง `intent.md` ให้อัตโนมัติ
-ตรวจสอบและแก้ไขผลลัพธ์ก่อนเริ่มเขียนเสมอ
-
-**ตัวเลือกระหว่างสัมภาษณ์:**
-- พิมพ์ `สรุป` — ให้ agent generate `intent.md` จากข้อมูลที่มีทันที โดยไม่ต้องรอครบทุก section
-- พิมพ์ `quit` — ออกโดยไม่บันทึก
-
-**เปลี่ยน model** (default: `nousresearch/hermes-3-llama-3.1-70b`):
-
-```bash
-export OPENROUTER_MODEL=nousresearch/hermes-3-llama-3.1-405b
-new-doc-intake proposal climate-project
 ```
 
 ---
@@ -77,8 +83,8 @@ new-doc-intake proposal climate-project
 
 ```
 my-study/
-├── intent.md        ← กรอกก่อนทุกครั้ง (thesis, claims, constraints)
-├── draft.qmd        ← Quarto document ที่ AI จะเขียนลงมา
+├── intent.md        ← thesis, claims, constraints (กรอกก่อนทุกครั้ง)
+├── draft.qmd        ← Quarto document ที่ writing agent จะเขียนลงมา
 ├── CLAUDE.md        ← context สำหรับ Claude Code
 ├── AGENTS.md        ← context สำหรับ OpenAI Codex
 ├── references/      ← ใส่ PDF ที่ต้องอ้างอิง
@@ -88,8 +94,6 @@ my-study/
 ---
 
 ## เขียนเอกสาร
-
-เปิด terminal ใน project folder แล้วเรียก AI tool ที่ต้องการ
 
 ### Claude Code
 
@@ -110,7 +114,7 @@ codex "draft outline"
 codex "expand introduction"
 ```
 
-### Render เป็น HTML / PDF
+### Render
 
 ```bash
 quarto render draft.qmd --to html
@@ -119,7 +123,7 @@ quarto render draft.qmd --to pdf
 
 ---
 
-## คำสั่งที่ AI เข้าใจ
+## คำสั่งที่ writing agent เข้าใจ
 
 | คำสั่ง | สิ่งที่เกิดขึ้น |
 |---|---|
@@ -131,6 +135,17 @@ quarto render draft.qmd --to pdf
 
 ---
 
+## เพิ่ม skill ใหม่
+
+สร้างไฟล์ใน `skills/` แล้วเรียกผ่าน `hermes`:
+
+```bash
+# สร้าง skills/review.md แล้วเรียกว่า:
+hermes review article my-study
+```
+
+---
+
 ## Dependencies
 
 - Python 3.8+ และ `pip install -r requirements.txt`
@@ -138,4 +153,4 @@ quarto render draft.qmd --to pdf
 - [Quarto](https://quarto.org) — สำหรับ render เอกสาร
 - Positron + Quarto extension — IDE แนะนำ
 - R หรือ Python — สำหรับ analysis chunks ใน .qmd
-- OpenRouter API key — สำหรับ `new-doc-intake`
+- OpenRouter API key — สำหรับ `hermes`

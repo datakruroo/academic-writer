@@ -1,0 +1,62 @@
+#!/bin/bash
+TYPE=$1
+NAME=$2
+
+if [ -z "$TYPE" ] || [ -z "$NAME" ]; then
+  echo "Usage: new-doc <type> <project-name>"
+  echo "Types: article | proposal | policy | report"
+  exit 1
+fi
+
+# resolve symlink so SYSTEM_DIR points to the repo root even when called via /usr/local/bin
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+done
+SYSTEM_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+TEMPLATE="$SYSTEM_DIR/templates/$TYPE.md"
+
+if [ ! -f "$TEMPLATE" ]; then
+  echo "Error: unknown type '$TYPE'"
+  echo "Available: article, proposal, policy, report"
+  exit 1
+fi
+
+# สร้าง project structure
+mkdir -p "$NAME"/{references,analysis}
+
+# intent.md จาก template
+cp "$TEMPLATE" "$NAME/intent.md"
+
+# CLAUDE.md — อ้าง system.md แบบ absolute path
+cat > "$NAME/CLAUDE.md" << EOF
+# CLAUDE.md
+
+ก่อนเริ่มงานทุกครั้ง อ่านไฟล์เหล่านี้ตามลำดับ:
+
+1. \`$SYSTEM_DIR/system.md\` — กฎ สไตล์ และ workflow ของระบบ
+2. \`intent.md\` — intention และ material ของเอกสารนี้
+
+ห้ามยกร่างหรือแก้ไขเอกสารโดยไม่อ่านทั้งสองไฟล์ก่อน
+EOF
+
+# draft.qmd เริ่มต้น
+cat > "$NAME/draft.qmd" << 'EOF'
+---
+title: ""
+author: ""
+date: today
+format: html
+---
+
+<!-- Academic Writer — draft.qmd -->
+<!-- กรอก intent.md ให้ครบก่อน แล้วค่อยสั่ง: claude "draft outline" -->
+EOF
+
+echo ""
+echo "✓ Project '$NAME' created (type: $TYPE)"
+echo ""
+echo "Next steps:"
+echo "  cd $NAME"
+echo "  # กรอก intent.md"
+echo "  claude 'draft outline'"

@@ -1,7 +1,9 @@
 # academic-writer
 
 ระบบช่วยเขียนเอกสารวิชาการด้วย AI สำหรับนักวิจัยสาขาวิทยาการข้อมูลทางการศึกษา
-รองรับ Claude Code, OpenAI Codex และ Hermes (ผ่าน OpenRouter)
+
+- **Hermes (OpenRouter)** — intake agent: สัมภาษณ์รับความต้องการและสร้าง `intent.md`
+- **Claude Code / OpenAI Codex** — writing agent: ยกร่างและแก้ไขเอกสารจาก `intent.md`
 
 ---
 
@@ -106,13 +108,6 @@ claude "review consistency"
 cd my-study
 codex "draft outline"
 codex "expand introduction"
-```
-
-### Hermes (OpenRouter) — ผ่าน shell script
-
-```bash
-cd my-study
-ask-hermes "draft outline"     # ดู scripts/ask-hermes ถ้ามี
 ```
 
 ### Render เป็น HTML / PDF

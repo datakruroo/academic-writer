@@ -302,8 +302,10 @@ def run_interview(doc_type, client, model):
     messages.append({"role": "assistant", "content": opening})
     print(f"Agent: {opening}\n")
 
+    MAX_TURNS = 30
+
     # Interview loop
-    while True:
+    for turn in range(MAX_TURNS):
         try:
             user_input = input("คุณ: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -342,13 +344,18 @@ def run_interview(doc_type, client, model):
                 if before:
                     print(f"\nAgent: {before}\n")
                 return match.group(1).strip()
-            # Marker present but no closing tag — try to grab everything after
+            # Marker present but no closing tag — grab everything after
             after_open = reply.split("<INTENT_COMPLETE>", 1)[1].strip()
             if after_open:
                 return after_open
 
         print(f"\nAgent: {reply}\n")
 
+        # Warn at turn 25 so user knows to wrap up
+        if turn == 24:
+            print(f"[แจ้งเตือน: เหลืออีก {MAX_TURNS - turn - 1} รอบ พิมพ์ 'สรุป' เพื่อ generate intent.md]\n")
+
+    print(f"\nถึงขีดจำกัด {MAX_TURNS} รอบแล้ว กรุณาพิมพ์ 'สรุป' ในครั้งหน้า หรือรัน new-doc-intake ใหม่")
     return None
 
 
@@ -388,8 +395,21 @@ def main():
         default_headers={"HTTP-Referer": "https://github.com/datakruroo/academic-writer"},
     )
 
+    # Warn before overwriting an existing project
+    project = Path(name)
+    if (project / "intent.md").exists():
+        print(f"คำเตือน: project '{name}' มี intent.md อยู่แล้ว")
+        try:
+            confirm = input("ต้องการรันสัมภาษณ์ใหม่และเขียนทับ intent.md? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nยกเลิก")
+            sys.exit(0)
+        if confirm != "y":
+            print("ยกเลิก")
+            sys.exit(0)
+
     create_project_structure(name, doc_type)
-    print(f"✓ Project '{name}' created")
+    print(f"✓ Project '{name}' ready")
 
     intent_content = run_interview(doc_type, client, model)
 

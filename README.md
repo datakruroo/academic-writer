@@ -35,7 +35,7 @@ academic-writer/
 ├── templates/         ← intent.md template เปล่าสำหรับ new-doc
 ├── scripts/
 │   ├── new-doc        ← สร้าง project + template intent.md เปล่า
-│   ├── hermes         ← runner สำหรับ Hermes skills
+│   ├── aw             ← runner สำหรับ Hermes skills
 │   └── new-doc-intake ← (legacy) intake แบบ Python chatbot
 └── install.sh
 ```
@@ -58,7 +58,7 @@ academic-writer/
 ### วิธีที่ 1 — ให้ Hermes สัมภาษณ์และเขียน intent.md ให้ (แนะนำ)
 
 ```bash
-hermes intake article my-study
+aw intake article my-study
 ```
 
 Hermes จะสัมภาษณ์ทีละขั้น เมื่อข้อมูลครบจะเรียก `write_file` เขียน `intent.md` ลง project folder โดยตรง แสดง preview และรอยืนยันก่อนจบ ถ้าไม่พอใจคุยต่อได้เลย
@@ -66,7 +66,7 @@ Hermes จะสัมภาษณ์ทีละขั้น เมื่อข
 **เปลี่ยน model:**
 ```bash
 export OPENROUTER_MODEL=nousresearch/hermes-3-llama-3.1-405b
-hermes intake proposal climate-project
+aw intake proposal climate-project
 ```
 
 ### วิธีที่ 2 — กรอก intent.md เอง
@@ -137,11 +137,11 @@ quarto render draft.qmd --to pdf
 
 ## เพิ่ม skill ใหม่
 
-สร้างไฟล์ใน `skills/` แล้วเรียกผ่าน `hermes`:
+สร้างไฟล์ใน `skills/` แล้วเรียกผ่าน `aw`:
 
 ```bash
 # สร้าง skills/review.md แล้วเรียกว่า:
-hermes review article my-study
+aw review article my-study
 ```
 
 ---
@@ -153,4 +153,4 @@ hermes review article my-study
 - [Quarto](https://quarto.org) — สำหรับ render เอกสาร
 - Positron + Quarto extension — IDE แนะนำ
 - R หรือ Python — สำหรับ analysis chunks ใน .qmd
-- OpenRouter API key — สำหรับ `hermes`
+- OpenRouter API key — สำหรับ `aw`

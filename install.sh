@@ -3,19 +3,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 chmod +x "$SCRIPT_DIR/scripts/new-doc"
 chmod +x "$SCRIPT_DIR/scripts/new-doc-intake"
-chmod +x "$SCRIPT_DIR/scripts/hermes"
+chmod +x "$SCRIPT_DIR/scripts/aw"
 
 ln -sf "$SCRIPT_DIR/scripts/new-doc" /usr/local/bin/new-doc
 ln -sf "$SCRIPT_DIR/scripts/new-doc-intake" /usr/local/bin/new-doc-intake
-ln -sf "$SCRIPT_DIR/scripts/hermes" /usr/local/bin/hermes
+ln -sf "$SCRIPT_DIR/scripts/aw" /usr/local/bin/aw
 
 echo "✓ new-doc installed"
 echo "✓ new-doc-intake installed"
-echo "✓ hermes installed"
+echo "✓ aw installed"
 echo ""
 echo "Usage:"
 echo "  new-doc <type> <project-name>              — สร้าง project + template intent.md"
-echo "  hermes intake <type> <project-name>        — สัมภาษณ์ด้วย Hermes + เขียนไฟล์อัตโนมัติ"
+echo "  aw intake <type> <project-name>            — สัมภาษณ์ด้วย Hermes + เขียนไฟล์อัตโนมัติ"
 echo ""
 echo "Types: article | proposal | policy | report"
 echo ""
